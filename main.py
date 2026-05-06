@@ -145,7 +145,7 @@ def meus_livros(usuario):
         print(f"{l['id_livro']:<5} {l['titulo']:<30} {l['autor']:<25} {l['estado_conservacao']:<10}")
         
 # ─────────────────────────────────────────────
-#  3 - VER LIVROS DISPONÍVEIS
+#  3 - VER LIVROS DISPONIVEIS
 # ─────────────────────────────────────────────
 def ver_livros_disponiveis(usuario):
     cursor.execute("""
@@ -165,3 +165,151 @@ def ver_livros_disponiveis(usuario):
     for l in livros:
         print(f"{l['id_livro']:<5} {l['titulo']:<30} {l['autor']:<25} {l['estado_conservacao']:<10} {l['dono']}")
     return True
+ 
+ 
+# ─────────────────────────────────────────────
+#  4 - PEDIR LIVRO
+# ─────────────────────────────────────────────
+def pedir_livro(usuario):
+    if not ver_livros_disponiveis(usuario): return
+ 
+    id_livro = input_ou_voltar("\nID do livro que queres pedir (0 para voltar): ")
+    if id_livro is None: return
+    if not id_livro.isdigit():
+        print("ID inválido!")
+        return
+ 
+    cursor.execute(
+        "SELECT * FROM LIVRO WHERE id_livro=%s AND disponivel=TRUE",
+        (int(id_livro),)
+    )
+    livro = cursor.fetchone()
+ 
+    if not livro:
+        print("Livro não encontrado ou não disponível.")
+        return
+    if livro["id_utilizador"] == usuario["id_utilizador"]:
+        print("Não podes pedir a troca do teu próprio livro.")
+        return
+ 
+    try:
+        cursor.execute(
+            "INSERT INTO TROCA (data_troca, id_livro, id_utilizador_origem, id_utilizador_destino) VALUES (%s,%s,%s,%s)",
+            (date.today(), livro["id_livro"], usuario["id_utilizador"], livro["id_utilizador"])
+        )
+        db.commit()
+        print("Pedido do livro enviado com sucesso! Estado: pendente.")
+    except Exception as e:
+        print("Erro ao pedir livro:", e)
+ 
+ 
+# ─────────────────────────────────────────────
+#  5 - VER PEDIDOS RECEBIDOS
+# ─────────────────────────────────────────────
+def ver_pedidos_recebidos(usuario):
+    cursor.execute("""
+        SELECT T.id_troca, L.titulo, U.nome AS solicitante, T.data_troca
+        FROM TROCA T
+        JOIN LIVRO L      ON T.id_livro = L.id_livro
+        JOIN UTILIZADOR U ON T.id_utilizador_origem = U.id_utilizador
+        WHERE T.id_utilizador_destino=%s AND T.estado_troca='pendente'
+    """, (usuario["id_utilizador"],))
+    pedidos = cursor.fetchall()
+ 
+    if not pedidos:
+        print("Não tens pedidos pendentes.")
+        return False
+ 
+    print(f"\n{'ID Troca':<10} {'Livro':<30} {'Solicitante':<25} {'Data'}")
+    print("─" * 75)
+    for p in pedidos:
+        print(f"{p['id_troca']:<10} {p['titulo']:<30} {p['solicitante']:<25} {p['data_troca']}")
+    return True
+ 
+ 
+# ─────────────────────────────────────────────
+#  6 - ACEITAR / RECUSAR PEDIDO
+# ─────────────────────────────────────────────
+def responder_pedido(usuario):
+    if not ver_pedidos_recebidos(usuario): return
+ 
+    id_troca = input_ou_voltar("\nID da troca (0 para voltar): ")
+    if id_troca is None: return
+    if not id_troca.isdigit():
+        print("ID inválido!")
+        return
+ 
+    cursor.execute(
+        "SELECT * FROM TROCA WHERE id_troca=%s AND id_utilizador_destino=%s AND estado_troca='pendente'",
+        (int(id_troca), usuario["id_utilizador"])
+    )
+    troca = cursor.fetchone()
+ 
+    if not troca:
+        print("Troca não encontrada ou já respondida.")
+        return
+ 
+    resposta = input("Aceitar (a) ou Recusar (r)? ").strip().lower()
+    if resposta not in ("a", "r"):
+        print("Resposta inválida.")
+        return
+ 
+    novo_estado = "aceite" if resposta == "a" else "recusada"
+    try:
+        cursor.execute(
+            "UPDATE TROCA SET estado_troca=%s WHERE id_troca=%s",
+            (novo_estado, troca["id_troca"])
+        )
+        if resposta == "a":
+            cursor.execute(
+                "UPDATE LIVRO SET disponivel=FALSE WHERE id_livro=%s",
+                (troca["id_livro"],)
+            )
+        db.commit()
+        print(f"Pedido {novo_estado} com sucesso!")
+    except Exception as e:
+        print("Erro ao responder pedido:", e)
+ 
+ 
+# ─────────────────────────────────────────────
+#  7 - HISTORICO DE TROCAS
+# ─────────────────────────────────────────────
+def historico_trocas(usuario):
+    cursor.execute("""
+        SELECT T.id_troca, L.titulo, UO.nome AS origem, UD.nome AS destino,
+               T.data_troca, T.estado_troca
+        FROM TROCA T
+        JOIN LIVRO      L  ON T.id_livro = L.id_livro
+        JOIN UTILIZADOR UO ON T.id_utilizador_origem  = UO.id_utilizador
+        JOIN UTILIZADOR UD ON T.id_utilizador_destino = UD.id_utilizador
+        WHERE T.id_utilizador_origem=%s OR T.id_utilizador_destino=%s
+        ORDER BY T.data_troca DESC
+    """, (usuario["id_utilizador"], usuario["id_utilizador"]))
+    trocas = cursor.fetchall()
+ 
+    if not trocas:
+        print("Ainda não tens trocas.")
+        return
+ 
+    print(f"\n{'ID':<5} {'Livro':<25} {'De':<20} {'Para':<20} {'Data':<12} {'Estado'}")
+    print("─" * 90)
+    for t in trocas:
+        print(f"{t['id_troca']:<5} {t['titulo']:<25} {t['origem']:<20} {t['destino']:<20} {str(t['data_troca']):<12} {t['estado_troca']}")
+
+        #__________Menu Principal__________
+def principal():
+    while True:
+        print("\n1 Registar")
+        print("2 Login")
+        print("3 Sair")
+        op = input("Escolha: ").strip()
+        if   op == "1": registar()
+        elif op == "2":
+            usuario = login()
+            if usuario:
+                menu_utilizador(usuario)
+        elif op == "3": break
+        else: print("Opção inválida!")
+
+if __name__ == "__main__":
+    principal()
